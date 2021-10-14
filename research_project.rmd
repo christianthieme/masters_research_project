@@ -1,0 +1,26 @@
+---
+title: "DATA698 Final Research Project "
+author: "Christian Thieme"
+date: "12/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Abstract
+
+This section will be written last.
+
+## Introduction
+
+## Literature Review
+
+## Methodology
+
+## Data Gathering & Pre-processing
+
+```{r}
+
+```
