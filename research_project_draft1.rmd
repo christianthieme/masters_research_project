@@ -1,8 +1,10 @@
 ---
-title: "DATA698 Final Research Project "
+title: 'DATA698 Final Research Project '
 author: "Christian Thieme"
 date: "12/10/2021"
-output: html_document
+output:
+  word_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -429,35 +431,3 @@ Wright, D. (n.d.). *DAVID WRIGHT*. Retrieved from
 <https://dynastyleaguefootball.com/author/spacemnspiff207/>
 
 ## Appendix 
-
-```{r}
-wr <- readr::read_csv("https://raw.githubusercontent.com/christianthieme/masters_research_project/master/wide_receiver_databaseV1.csv")  %>% 
-  mutate_if(is.character, as.factor)
-
-head(wr)
-```
-
-Rookies are those who have been in the NFL for less than 3 years, so we'll exclude these players from the dataset since we won't have enough data for most players to determine if they are "break out" wide receivers.
-
-We'll also remove columns with data from 2023 as there is limited data at this time.
-
-```{r}
-wr2 <- wr %>% 
-  filter(Draft_Year < 2019 ) %>%
-  select(-contains("_23"))
-  
-wr2
-```
-
-Removing 2023 removed roughly 51 columns. The dataset contains 656 rows and 551 columns. We have way too many columns. We'll need to use some method to determine which are actually predictive.
-
-There are two challenging problems with this dataset. The first is that there are lots of nulls in the dataset. The second is that there are so many columns in the dataset. We'll have to solve both of these issues in order to come up with an appropriate model.
-
-Most of the nulls can be filled with zeros where the players didn't have any stats for a particular year or metric, however, one of the potentially larger predictive factors are the combine scores, however, quite a few players don't have combine metrics. We'll use a split method here and impute the combine columns, but fill the other metrics with zeros.
-
--- make conversation about VIM being most accurate imputation method
-
-```{r}
-
-wr2 %>% select(Combine_BMI, Combine_Height, Combine_Weight, Combine_HandSize, Combine_ArmLength, Combine_40time, Combine_Bench, Combine_Vertical, Combine_Broad, Combine_Shuttle, Combine_3Cone, Combine_HaSS, RAS, Agility_Score, Burst_Score, Freak_Score)
-```
