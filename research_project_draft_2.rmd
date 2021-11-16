@@ -1,8 +1,10 @@
 ---
-title: "DATA698 Final Research Project "
+title: 'DATA698 Final Research Project '
 author: "Christian Thieme"
 date: "12/10/2021"
-output: html_document
+output:
+  word_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -10,6 +12,10 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(VIM)
 library(mice)
+library(ranger)
+library(tidymodels)
+library(doParallel)
+library(janitor)
 ```
 
 ## Abstract
@@ -18,7 +24,7 @@ This section will be written last after final results are available
 
 ## Introduction
 
-Sports analytics has grown exponentially in the last decade. The success of "Moneyball" type analytics in baseball has led to many other sports attempting to find an edge using analytics. Sports teams around the country, both professional and collegiate, employ full time analysts to try and squeeze out any ounce of improvement for their teams that they can. Another area in the sports arena that has grown tremendously over the last 10 years are fans involvement in "fantasy" leagues. These leagues allow the individual to "draft" players on to their team and then are given points each week based on the performance of the players in the team. The fantasy football following is the largest of all the fantasy sports. While these leagues may sound silly to some, there are millions of people who play and there is **big** money involved. The NFL's biggest prize is \$1,000,000 (Subramanian, 2014).
+Sports analytics has grown exponentially in the last decade. The success of "Moneyball" type analytics in baseball has led to many other sports attempting to find an edge using analytics. Sports teams around the country, both professional and collegiate, employ full-time analysts to try and squeeze out any ounce of improvement for their teams that they can. Another area in the sports arena that has grown tremendously over the last 10 years are fans involvement in "fantasy" leagues. These leagues allow the individual to "draft" players on to their team and then are given points each week based on the performance of the players in the team. The fantasy football following is the largest of all the fantasy sports. While these leagues may sound silly to some, there are millions of people who play and there is **big** money involved. The NFL's biggest prize is \$1,000,000 (Subramanian, 2014).
 
 More and more people are turning from using their gut, to really diving into the analytics of players and teams (Koss, 2020). In a special kind of league called a dynasty league, participants are allowed to keep their players year after year. That means that a major way to improve your standings each year is to draft the right rookies on to your team as players transition from college to the NFL. One of the positions that can have a huge impact on a dynasty team as a rookie is that of the wide receiver.
 
@@ -278,7 +284,7 @@ The most difficult part of working with this dataset, is determining what to do 
 
 One area where I decided not to fill missing values with zero was the columns related to the combine tests. Combine results are heavily utilized when players are being drafted and so I am making an assumption that they will be important to the predictive power of our model. It is fairly common for players to miss certain tests within the combine (due to injury, for example), so they may have values for some metrics but not others. A smaller population opt to not take part in the combine, while others may be injured and can't participate.
 
-Because most of the players have values for several of the combine metrics, I assume that players with recorded values in certain metrics may also have similar values in other metrics. For this reason, I am imputing these missing values using predictive mean matching (pmm).
+Because most of the players have values for several of the combine metrics, I assume that players with recorded values in certain metrics may also have similar values in other metrics. For this reason, I am imputing these missing values.
 
 The other struggle was the sheer number of columns within this dataset. Working through 600+ columns is unrealistic, so other methods were needed to determine how to reduce the dimensionality of the dataset.
 
@@ -325,7 +331,7 @@ Wright, D. (n.d.). *DAVID WRIGHT*. Retrieved from <https://dynastyleaguefootball
 ## Appendix
 
 ```{r}
-wr <- readr::read_csv("https://raw.githubusercontent.com/christianthieme/masters_research_project/master/wide_receiver_databaseV1.csv")  %>% 
+wr <- readr::read_csv("https://raw.githubusercontent.com/christianthieme/masters_research_project/master/wide_receiver_databaseV1.csv") %>% 
   mutate_if(is.character, as.factor)
 
 head(wr)
@@ -333,17 +339,31 @@ head(wr)
 
 Rookies are those who have been in the NFL for less than 3 years, so we'll exclude these players from the dataset since we won't have enough data for most players to determine if they are "break out" wide receivers.
 
-We'll also remove columns with data from 2023 as there is limited data at this time.
+We'll also remove columns with data from 2023 as there is limited data at this time. We'll also make some other transformations
 
 ```{r}
 wr2 <- wr %>% 
   filter(Draft_Year < 2019 ) %>%
-  select(-contains("_23"))
-  
+  select(-contains("_23")) %>% 
+  mutate(Drafted = as.factor(ifelse(DR == 'UDFA', 'No', 'Yes'))) %>% 
+  mutate(DR = ifelse(DR == 'UDFA', 10, DR)) %>%
+  mutate(DP = ifelse(DP == 'UDFA', 999, DP)) %>% 
+  mutate(breakout = as.factor(ifelse(fantasy_ppg >= 10, 'Yes', 'No'))) %>% 
+##  mutate(Draft_year = as.factor(Draft_Year)) %>% 
+  mutate(CareerAverage_KRTDs = as.numeric(CareerAverage_KRTDs)) %>%
+  mutate(CareerAverage_PuntReturns = as.numeric(CareerAverage_PuntReturns)) %>%
+  mutate(CareerAverage_PRYards = as.numeric(CareerAverage_PRYards)) %>%
+  mutate(CareerAverage_PRTDs = as.numeric(CareerAverage_PRTDs))
+
 wr2
 ```
 
-Removing 2023 removed roughly 51 columns. The dataset contains 656 rows and 551 columns. We have way too many columns. We'll need to use some method to determine which are actually predictive.
+```{r}
+wr2 %>% 
+  count(breakout)
+```
+
+Removing 2023 statistics removed roughly 51 columns. The dataset contains 656 rows and 551 columns. We have way too many columns. We'll need to use some method to determine which are actually predictive.
 
 There are two challenging problems with this dataset. The first is that there are lots of nulls in the dataset. The second is that there are so many columns in the dataset. We'll have to solve both of these issues in order to come up with an appropriate model.
 
@@ -353,5 +373,75 @@ Most of the nulls can be filled with zeros where the players didn't have any sta
 
 ```{r}
 
-wr2 %>% select(Combine_BMI, Combine_Height, Combine_Weight, Combine_HandSize, Combine_ArmLength, Combine_40time, Combine_Bench, Combine_Vertical, Combine_Broad, Combine_Shuttle, Combine_3Cone, Combine_HaSS, RAS, Agility_Score, Burst_Score, Freak_Score)
+wr_fill_0 <- wr2 %>% 
+  select(-Combine_BMI, -Combine_Height, -Combine_Weight, -Combine_HandSize, -Combine_ArmLength, -Combine_40time, -Combine_Bench, -Combine_Vertical, -Combine_Broad, -Combine_Shuttle, -Combine_3Cone, -Combine_HaSS, -RAS, -Agility_Score, -Burst_Score, -Freak_Score) %>%
+  mutate(key = paste0(Player, School, Conf, DOB))
+
+wr_fill_0[is.na(wr_fill_0)] <- 0 
+
+# wr_fill_0_key <- wr_fill_0 %>%
+#   mutate(key = paste0(Player, School, Conf, DOB)
 ```
+
+```{r}
+wr_fill_impute_select <- wr2 %>% 
+  select(Player, School, Conf, DOB, Combine_BMI, Combine_Height, Combine_Weight, Combine_HandSize, Combine_ArmLength, Combine_40time, Combine_Bench, Combine_Vertical, Combine_Broad, Combine_Shuttle, Combine_3Cone, Combine_HaSS, RAS, Agility_Score, Burst_Score, Freak_Score) %>%
+  mutate(key = paste0(Player, School, Conf, DOB)) %>% 
+  select(-Player, -School, -Conf, -DOB)
+
+wr_no_nulls <- wr_fill_0 %>% 
+  left_join(wr_fill_impute_select, by = "key") %>%
+  select(-Draft_Year, -key)
+```
+
+```{r}
+null_cols<- colSums(is.na(wr_no_nulls))
+null_cols[null_cols>0]
+```
+
+```{r}
+null_cols<- colSums(is.na(wr_no_nulls))
+null_cols[null_cols>0]
+```
+
+
+```{r}
+wr_no_nulls <- wr_no_nulls %>%
+  janitor::clean_names()
+```
+
+```{r}
+wr_no_nulls %>%
+  count(breakout) %>%
+  mutate(prop = n/sum(n))
+```
+
+
+```{r}
+wr_recipe <- recipe(breakout ~ ., data = wr_train) %>% 
+  update_role(Player, new_role = 'ID') %>% 
+  step_knnimpute(all_predictors())
+```
+
+```{r}
+prepped_rec <- prep(wr_recipe, training = wr_train)
+train_data <- bake(prepped_rec, new_data = wr_train) %>%
+  select(-fantasy_ppg)
+test_data <- bake(prepped_rec, new_data = wr_test) %>%
+  select(-fantasy_ppg)
+```
+
+
+
+```{r}
+rf_recipe <- 
+ recipe(breakout ~ ., data = train_data) %>%
+    update_role(Player , new_role = "ID") %>%
+    step_novel(all_nominal(), -all_outcomes()) %>%
+    step_dummy(all_nominal(), -all_outcomes()) %>%
+    step_zv(all_predictors()) %>% #remove all variables with only a single value
+    step_normalize(all_predictors()) %>%
+    step_knnimpute(all_predictors()) %>%
+    step_upsample(breakout, over_ratio = 1.0) 
+```
+
